@@ -82,30 +82,41 @@ public class WalletToolsDASH implements IWalletTools {
 
     @Override
     public String getWalletAddressFromAccountPUB(String accountPUB, String cryptoCurrency, int chainIndex, int index) {
-        if (!accountPUB.startsWith("drkp")) {
+        if (!accountPUB.startsWith("drkp") &&
+            !accountPUB.startsWith("drkv") &&
+            !accountPUB.startsWith("xpub")) {
             return null;
         }
         byte[] serializedKey = Base58.decodeChecked(accountPUB);
         ByteBuffer buffer = ByteBuffer.wrap(serializedKey);
+
+        // Note: These version bytes shouldn't matter as the deserialized key
+        // is all that matters.
+        //
+        // At various points in history Dash has used "xpub", "drkv" (or "drkp"
+        // due to confusion) and back again for the xpub header. It's not
+        // relevant to the extended key material.
+        //
+        // This check should be removed.
         int header = buffer.getInt();
-        if(header != MainNetParams.get().getBip32HeaderPriv() && header != MainNetParams.get().getBip32HeaderPub()) {
+        if (header != MainNetParams.get().getBip32HeaderPriv() &&
+            header != MainNetParams.get().getBip32HeaderPub()) {
             throw new IllegalArgumentException("Unknown header bytes in xpub: " + accountPUB);
-        } else {
-            boolean pub = header == MainNetParams.get().getBip32HeaderPub();
-            if (pub) {
-                int depth = buffer.get() & 255;
-                DeterministicKey accountKey = DeterministicKey.deserializeB58(accountPUB, MainNetParams.get());
-                DeterministicKey walletKey = accountKey;
-                if (depth != 2) {
-                    //bip44
-                    final DeterministicKey chainKey = HDKeyDerivation.deriveChildKey(accountKey, new ChildNumber(chainIndex, false));
-                    walletKey = HDKeyDerivation.deriveChildKey(chainKey, new ChildNumber(index, false));
-                }
-                return new Address(MainNetParams.get(), walletKey.getPubKeyHash()).toBase58();
-            }else {
-                return null;
-            }
         }
+
+        boolean pub = header == MainNetParams.get().getBip32HeaderPub();
+        if (!pub) {
+            return null;
+        }
+        int depth = buffer.get() & 255;
+        DeterministicKey accountKey = DeterministicKey.deserializeB58(accountPUB, MainNetParams.get());
+        DeterministicKey walletKey = accountKey;
+        if (depth != 2) {
+            //bip44
+            final DeterministicKey chainKey = HDKeyDerivation.deriveChildKey(accountKey, new ChildNumber(chainIndex, false));
+            walletKey = HDKeyDerivation.deriveChildKey(chainKey, new ChildNumber(index, false));
+        }
+        return new Address(MainNetParams.get(), walletKey.getPubKeyHash()).toBase58();
     }
 
     @Override
@@ -161,10 +172,9 @@ public class WalletToolsDASH implements IWalletTools {
     public boolean isAddressValid(String address, String cryptoCurrency) {
         if (address == null) {
             return false;
-        }else{
-            if (!(address.startsWith("X"))){
-                return false;
-            }
+        }
+        if (!address.startsWith("X") && !address.startsWith("7")) {
+            return false;
         }
 
         try {
@@ -245,14 +255,13 @@ public class WalletToolsDASH implements IWalletTools {
             } catch (AddressFormatException e) {
                 //e.printStackTrace();
             }
-        }else if (input.startsWith("drkp")) {
+        }else if (input.startsWith("drkp") || input.startsWith("xpub")) {
             return new Classification(Classification.TYPE_PUB,IClient.DASH,input);
-        }else if (input.startsWith("drkv")) {
+        }else if (input.startsWith("drkv") || input.startsWith("xprv")) {
             return new Classification(Classification.TYPE_PRV,IClient.DASH,input);
         }
 
         return new Classification(Classification.TYPE_UNKNOWN);
-
     }
 
     private static boolean isAddressValidInternal(String address) {
